@@ -4,44 +4,46 @@ function App() {
   const [todos, setTodos] = useState([]);
   const [task, setTask] = useState("");
 
-  // ✅ Fetch all todos from backend
+  // Fetch todos
   const fetchTodos = () => {
     fetch("http://localhost:5000/todos")
       .then((res) => res.json())
-      .then((data) => setTodos(data))
-      .catch((err) => console.error("Fetch error:", err));
+      .then((data) => setTodos(data));
   };
 
   useEffect(() => {
     fetchTodos();
   }, []);
 
-  // ✅ Add new todo
+  // Add todo
   const addTodo = () => {
-    console.log("🟡 Button clicked, task:", task);
-
-    if (!task.trim()) {
-      console.log("❌ Empty task");
-      return;
-    }
+    if (!task.trim()) return;
 
     fetch("http://localhost:5000/todos", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ task }),
     })
-      .then((res) => {
-        console.log("🟢 Response status:", res.status);
-        return res.json();
-      })
+      .then((res) => res.json())
       .then((newTodo) => {
-        console.log("🟢 Response data:", newTodo);
         setTodos([...todos, newTodo]);
         setTask("");
-      })
-      .catch((err) => console.error("❌ Fetch error:", err));
+      });
+  };
+
+  // Mark Done / Undo
+  const toggleStatus = (id, completed) => {
+    fetch(`http://localhost:5000/todos/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ completed }),
+    }).then(() => {
+      setTodos(
+        todos.map((todo) =>
+          todo.id === id ? { ...todo, completed } : todo
+        )
+      );
+    });
   };
 
   return (
@@ -49,7 +51,6 @@ function App() {
       <h2>Todo App</h2>
 
       <input
-        type="text"
         value={task}
         onChange={(e) => setTask(e.target.value)}
         placeholder="Enter todo"
@@ -58,7 +59,30 @@ function App() {
 
       <ul>
         {todos.map((todo) => (
-          <li key={todo.id}>{todo.task}</li>
+          <li key={todo.id} style={{ marginTop: "8px" }}>
+            <span
+              style={{
+                textDecoration: todo.completed ? "line-through" : "none",
+                marginRight: "10px",
+              }}
+            >
+              {todo.task}
+            </span>
+
+            {todo.completed ? (
+              <button
+                onClick={() => toggleStatus(todo.id, false)}
+              >
+                Undo
+              </button>
+            ) : (
+              <button
+                onClick={() => toggleStatus(todo.id, true)}
+              >
+                Done
+              </button>
+            )}
+          </li>
         ))}
       </ul>
     </div>
