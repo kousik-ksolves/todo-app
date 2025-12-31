@@ -1,6 +1,6 @@
 services:
-  mysql:
-    image: mysql:8.0
+  mysql_db:
+    image: mysql:5.7
     container_name: todo-mysql
     restart: always
     environment:
@@ -8,13 +8,15 @@ services:
       MYSQL_DATABASE: tododb
       MYSQL_USER: todo
       MYSQL_PASSWORD: todopassword
-    volumes: 
-      - mysql-data:/var/lib/mysql
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    # volumes: 
+    #   - mysql-data:/var/lib/mysql
+    #   - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports: 
       - "3307:3306"
 
   backend:
+    depends_on:
+        - mysql_db
     build: ./backend
     container_name: todo-backend
     restart: always
@@ -26,17 +28,17 @@ services:
       PORT: 5000
     ports: 
       - "5000:5000"
-    depends_on:
-      - mysql
+    
 
   frontend:
+    depends_on:
+      - backend
     build: ./frontend
     container_name: todo-frontend
     restart: always
     ports:
       - "3000:80"
-    depends_on:
-      - backend
+    
 
 volumes:
   mysql-data:

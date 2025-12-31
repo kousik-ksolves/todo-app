@@ -1,75 +1,139 @@
 const express = require("express");
 const mysql = require("mysql2");
+const util = require("util");
 const cors = require("cors");
-require("dotenv").config();
 
 const app = express();
-
-app.use(cors());
 app.use(express.json());
+app.use(cors());
 
-// MySQL connection
-const db = mysql.createConnection({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+const PORT = process.env.PORT || 5000;
 
-db.connect((err) => {
-  if (err) {
-    console.error("❌ MySQL connection failed:", err.message);
-    return;
-  }
-  console.log("✅ MySQL connected");
-});
+/* =========================
+   MySQL Configuration
+========================= */
+const dbConfig = {
+  host: process.env.DB_HOST || "todo-mysql",
+  user: process.env.DB_USER || "todo",
+  password: process.env.DB_PASSWORD || "todopassword",
+  database: process.env.DB_NAME || "tododb",
+};
 
-// GET all todos
-app.get("/todos", (req, res) => {
-  db.query("SELECT * FROM todos", (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
-});
+let db;
+let hasLoggedWaiting = false;
 
-// ADD todo
-app.post("/todos", (req, res) => {
-  const { task } = req.body;
+/* =========================
+   Helper Functions
+========================= */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  if (!task) {
-    return res.status(400).json({ error: "Task is required" });
-  }
+/* =========================
+   DB Connection with Retry
+========================= */
+async function connectWithRetry() {
+  while (true) {
+    try {
+      db = mysql.createConnection(dbConfig);
 
-  db.query(
-    "INSERT INTO todos (task, completed) VALUES (?, false)",
-    [task],
-    (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({
-        id: result.insertId,
-        task,
-        completed: false,
-      });
+      const connect = util.promisify(db.connect).bind(db);
+      await connect();
+
+      console.log("✅ MySQL connected");
+
+      const query = util.promisify(db.query).bind(db);
+
+      // Create table if not exists
+      await query(`
+        CREATE TABLE IF NOT EXISTS todos (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          task VARCHAR(255) NOT NULL,
+          completed BOOLEAN DEFAULT false
+        )
+      `);
+
+      console.log("✅ todos table ready");
+      break;
+    } catch (err) {
+      if (!hasLoggedWaiting) {
+        console.log("⏳ Waiting for MySQL...");
+        hasLoggedWaiting = true;
+      }
+      await sleep(3000);
     }
-  );
+  }
+}
+
+/* =========================
+   API Routes
+========================= */
+
+// Get all todos
+app.get("/todos", async (req, res) => {
+  try {
+    const query = util.promisify(db.query).bind(db);
+    const results = await query("SELECT * FROM todos");
+    console.log("📥 Fetched todos");
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch todos" });
+  }
 });
 
-// UPDATE todo status (Done / Undo)
-app.put("/todos/:id", (req, res) => {
+// Add new todo
+app.post("/todos", async (req, res) => {
+  const { task } = req.body;
+  if (!task) return res.status(400).json({ error: "Task is required" });
+
+  try {
+    const query = util.promisify(db.query).bind(db);
+    await query("INSERT INTO todos (task) VALUES (?)", [task]);
+    console.log(`➕ Todo added: ${task}`);
+    res.json({ message: "Todo added" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to add todo" });
+  }
+});
+
+// Mark todo as done / undo
+app.put("/todos/:id", async (req, res) => {
   const { completed } = req.body;
   const { id } = req.params;
 
-  db.query(
-    "UPDATE todos SET completed = ? WHERE id = ?",
-    [completed, id],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ success: true });
-    }
-  );
+  try {
+    const query = util.promisify(db.query).bind(db);
+    await query("UPDATE todos SET completed=? WHERE id=?", [
+      completed,
+      id,
+    ]);
+    console.log(
+      completed
+        ? `✔️ Todo ${id} marked as done`
+        : `↩️ Todo ${id} undone`
+    );
+    res.json({ message: "Todo updated" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update todo" });
+  }
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+// Delete todo
+app.delete("/todos/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const query = util.promisify(db.query).bind(db);
+    await query("DELETE FROM todos WHERE id=?", [id]);
+    console.log(`🗑️ Todo ${id} deleted`);
+    res.json({ message: "Todo deleted" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to delete todo" });
+  }
+});
+
+/* =========================
+   Start Server
+========================= */
+connectWithRetry().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+  });
 });
